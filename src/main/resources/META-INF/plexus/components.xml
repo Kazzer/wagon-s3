@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component-set>
+    <components>
+        <component>
+            <role>org.apache.maven.wagon.Wagon</role>
+            <role-hint>s3</role-hint>
+            <implementation>com.allya.maven.wagon.providers.s3.S3Wagon</implementation>
+            <instantiation-strategy>per-lookup</instantiation-strategy>
+        </component>
+    </components>
+</component-set>
