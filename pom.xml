@@ -4,7 +4,7 @@
 
     <groupId>com.allya.maven.wagon</groupId>
     <artifactId>wagon-s3</artifactId>
-    <version>1.0.0</version>
+    <version>1.0.1-SNAPSHOT</version>
 
     <name>Allya :: Apache Maven Wagon :: Providers :: S3 Provider</name>
     <description>Wagon provider that gets and puts artefacts through AWS S3</description>
@@ -58,7 +58,7 @@
         <connection>scm:git:git://github.com/Kazzer/wagon-s3.git</connection>
         <developerConnection>scm:git:git@github.com:Kazzer/wagon-s3.git</developerConnection>
         <url>https://github.com/Kazzer/wagon-s3</url>
-        <tag>wagon-s3-1.0.0</tag>
+        <tag>HEAD</tag>
     </scm>
 
     <inceptionYear>2019</inceptionYear>
