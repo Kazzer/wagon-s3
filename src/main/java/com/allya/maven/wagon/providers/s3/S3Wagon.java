@@ -4,6 +4,7 @@ import static com.amazonaws.regions.Regions.US_EAST_1;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.Date;
 
 import org.apache.maven.wagon.AbstractWagon;
@@ -34,7 +35,7 @@ public final class S3Wagon extends AbstractWagon {
     private AmazonS3 s3;
     private String bucket;
     private String prefix;
-    private CannedAccessControlList acl = CannedAccessControlList.Private;
+    private CannedAccessControlList acl;
     private TransferManager transferManager;
 
     @Override
@@ -98,9 +99,11 @@ public final class S3Wagon extends AbstractWagon {
                 ase);
         }
 
-        acl = CannedAccessControlList.valueOf(System.getProperty(
-            PROPERTY_KEY_ACL,
-            CannedAccessControlList.Private.name()));
+        acl = Arrays
+            .stream(CannedAccessControlList.values())
+            .filter(cacl -> cacl.toString().equals(System.getProperty(PROPERTY_KEY_ACL)))
+            .findFirst()
+            .orElse(null);
         prefix = getPrefix(getRepository().getBasedir());
     }
 
