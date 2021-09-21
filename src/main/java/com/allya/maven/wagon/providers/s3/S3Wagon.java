@@ -1,11 +1,12 @@
 package com.allya.maven.wagon.providers.s3;
 
-import static com.amazonaws.regions.Regions.US_EAST_1;
+import static java.lang.Boolean.TRUE;
+import static software.amazon.awssdk.regions.Region.US_EAST_1;
+import static software.amazon.awssdk.regions.Region.of;
 
 import java.io.File;
-import java.io.IOException;
+import java.time.Instant;
 import java.util.Arrays;
-import java.util.Date;
 
 import org.apache.maven.wagon.AbstractWagon;
 import org.apache.maven.wagon.ConnectionException;
@@ -15,36 +16,44 @@ import org.apache.maven.wagon.authentication.AuthenticationException;
 import org.apache.maven.wagon.events.TransferEvent;
 import org.apache.maven.wagon.resource.Resource;
 
-import com.amazonaws.AmazonServiceException;
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
-import com.amazonaws.services.s3.AmazonS3;
-import com.amazonaws.services.s3.AmazonS3ClientBuilder;
-import com.amazonaws.services.s3.model.CannedAccessControlList;
-import com.amazonaws.services.s3.model.ObjectMetadata;
-import com.amazonaws.services.s3.model.PutObjectRequest;
-import com.amazonaws.services.s3.transfer.Download;
-import com.amazonaws.services.s3.transfer.TransferManager;
-import com.amazonaws.services.s3.transfer.TransferManagerBuilder;
-import com.amazonaws.services.s3.transfer.Upload;
+import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
+import software.amazon.awssdk.awscore.exception.AwsServiceException;
+import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.S3Configuration;
+import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadBucketRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
+import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
+import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
+import software.amazon.awssdk.services.s3.model.ObjectCannedACL;
+import software.amazon.awssdk.services.s3.model.PutObjectRequest;
+import software.amazon.awssdk.transfer.s3.Download;
+import software.amazon.awssdk.transfer.s3.DownloadRequest;
+import software.amazon.awssdk.transfer.s3.S3ClientConfiguration;
+import software.amazon.awssdk.transfer.s3.S3TransferManager;
+import software.amazon.awssdk.transfer.s3.Upload;
+import software.amazon.awssdk.transfer.s3.UploadRequest;
 
 // CHECKSTYLE.OFF: ClassDataAbstractionCoupling
 public final class S3Wagon extends AbstractWagon {
     // CHECKSTYLE.ON: ClassDataAbstractionCoupling
     private static final String PROPERTY_KEY_ACL = "maven.wagon.s3.acl";
+    private static final String PROPERTY_KEY_REGION = "maven.wagon.s3.region";
 
-    private AmazonS3 s3;
+    private S3Client s3;
     private String bucket;
     private String prefix;
-    private CannedAccessControlList acl;
-    private TransferManager transferManager;
+    private ObjectCannedACL acl;
+    private S3TransferManager transferManager;
 
     @Override
     protected void closeConnection() {
-        transferManager.shutdownNow();
+        transferManager.close();
 
         fireSessionLoggedOff();
 
-        s3.shutdown();
+        s3.close();
     }
 
     @Override
@@ -64,8 +73,12 @@ public final class S3Wagon extends AbstractWagon {
 
         fireGetInitiated(resource, destination);
 
-        final ObjectMetadata metadata = s3.getObjectMetadata(bucket, String.join("", prefix, resourceName));
-        final boolean destinationIsNewer = metadata.getLastModified().compareTo(new Date(timestamp)) < 0;
+        final HeadObjectResponse metadata = s3.headObject(HeadObjectRequest
+            .builder()
+            .bucket(bucket)
+            .key(String.join("", prefix, resourceName))
+            .build());
+        final boolean destinationIsNewer = metadata.lastModified().isAfter(Instant.ofEpochMilli(timestamp));
         if (destinationIsNewer) {
             getObject(resource, destination);
         }
@@ -76,31 +89,41 @@ public final class S3Wagon extends AbstractWagon {
     @Override
     protected void openConnectionInternal() throws ConnectionException, AuthenticationException {
         bucket = getRepository().getHost();
-        s3 = AmazonS3ClientBuilder
-            .standard()
-            .withRegion(US_EAST_1)
-            .withForceGlobalBucketAccessEnabled(true)
-            .withCredentials(new DefaultAWSCredentialsProviderChain())
+        s3 = S3Client
+            .builder()
+            .credentialsProvider(DefaultCredentialsProvider.create())
+            .region(of(System.getProperty(PROPERTY_KEY_REGION, US_EAST_1.id())))
+            .serviceConfiguration(S3Configuration
+                .builder()
+                .multiRegionEnabled(TRUE)
+                .useArnRegionEnabled(TRUE)
+                .build())
             .build();
-        transferManager = TransferManagerBuilder.standard().withS3Client(s3).build();
+        transferManager = S3TransferManager
+            .builder()
+            .s3ClientConfiguration(S3ClientConfiguration
+                .builder()
+                .credentialsProvider(DefaultCredentialsProvider.create())
+                .region(of(System.getProperty(PROPERTY_KEY_REGION, US_EAST_1.id())))
+                .build())
+            .build();
 
         fireSessionLoggedIn();
 
-        if (!s3.doesBucketExistV2(bucket)) {
+        try {
+            s3.headBucket(HeadBucketRequest.builder().bucket(bucket).build());
+        }
+        catch (final NoSuchBucketException nsbe) {
             throw new ConnectionException(String.format("Bucket '%s' does not exist", bucket));
         }
-
-        try {
-            s3.getBucketAcl(bucket);
-        }
-        catch (final AmazonServiceException ase) {
+        catch (final AwsServiceException ase) {
             throw new AuthenticationException(
                 String.format("Insufficient permissions to access bucket '%s'", bucket),
                 ase);
         }
 
         acl = Arrays
-            .stream(CannedAccessControlList.values())
+            .stream(ObjectCannedACL.values())
             .filter(cacl -> cacl.toString().equals(System.getProperty(PROPERTY_KEY_ACL)))
             .findFirst()
             .orElse(null);
@@ -116,22 +139,25 @@ public final class S3Wagon extends AbstractWagon {
         final String key;
         key = String.join("", prefix, destination);
 
-        final ObjectMetadata metadata = new ObjectMetadata();
-        metadata.setContentLength(source.length());
         Upload upload = null;
         try {
-            upload = transferManager.upload(new PutObjectRequest(bucket, key, source)
-                .withCannedAcl(acl)
-                .withMetadata(metadata));
-            upload.waitForCompletion();
+            upload = transferManager.upload(UploadRequest
+                .builder()
+                .putObjectRequest(PutObjectRequest
+                    .builder()
+                    .acl(acl)
+                    .bucket(bucket)
+                    .contentLength(source.length())
+                    .key(key)
+                    .build())
+                .source(source)
+                .build());
+            upload.completionFuture().join();
         }
-        catch (final AmazonServiceException ase) {
+        catch (final AwsServiceException ase) {
             fireTransferError(resource, ase, TransferEvent.REQUEST_PUT);
 
             throw new TransferFailedException(String.format("Unable to upload '%s'", source.getName()), ase);
-        }
-        catch (final InterruptedException ioe) {
-            upload.abort();
         }
 
         postProcessListeners(resource, source, TransferEvent.REQUEST_PUT);
@@ -145,7 +171,14 @@ public final class S3Wagon extends AbstractWagon {
 
         final String key = String.join("", prefix, source.getName());
 
-        if (!s3.doesObjectExist(bucket, key)) {
+        try {
+            s3.headObject(HeadObjectRequest
+                .builder()
+                .bucket(bucket)
+                .key(key)
+                .build());
+        }
+        catch (final NoSuchKeyException nske) {
             fireTransferError(source, null, TransferEvent.REQUEST_GET);
 
             throw new ResourceDoesNotExistException(String.format(
@@ -156,21 +189,30 @@ public final class S3Wagon extends AbstractWagon {
 
         Download download = null;
         try {
-            download = transferManager.download(bucket, key, destination);
-            download.waitForCompletion();
+            // File cannot be overwritten yet: https://github.com/aws/aws-sdk-java-v2/pull/2595
+            if (destination.exists()) {
+                if (!destination.delete()) {
+                    fireTransferError(source, null, TransferEvent.REQUEST_GET);
+                    throw new TransferFailedException(
+                        String.format("File '%s' already exists and cannot be deleted", destination.getPath()));
+                }
+            }
+
+            download = transferManager.download(DownloadRequest
+                .builder()
+                .destination(destination)
+                .getObjectRequest(GetObjectRequest
+                    .builder()
+                    .bucket(bucket)
+                    .key(key)
+                    .build())
+                .build());
+            download.completionFuture().join();
         }
-        catch (final AmazonServiceException ase) {
+        catch (final AwsServiceException ase) {
             fireTransferError(source, ase, TransferEvent.REQUEST_GET);
 
             throw new TransferFailedException(String.format("Unable to download '%s'", source.getName()), ase);
-        }
-        catch (final InterruptedException ie) {
-            try {
-                download.abort();
-            }
-            catch (final IOException ioe) {
-                download.pause();
-            }
         }
 
         postProcessListeners(source, destination, TransferEvent.REQUEST_GET);

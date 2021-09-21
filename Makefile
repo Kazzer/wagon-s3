@@ -5,8 +5,6 @@ GIT_BINARY := $(shell command -v git 2>/dev/null)
 MAVEN_BINARY := $(shell command -v mvn 2>/dev/null)
 
 MAVEN_OPTS ?= --illegal-access=warn
-# For spotbugs
-MAVEN_OPTS := $(MAVEN_OPTS) --add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.lang.invoke=ALL-UNNAMED --add-opens java.base/java.io=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/java.lang.reflect=ALL-UNNAMED
 
 all: dist
 
