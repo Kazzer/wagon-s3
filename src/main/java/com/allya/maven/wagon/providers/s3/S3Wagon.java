@@ -28,12 +28,12 @@ import software.amazon.awssdk.services.s3.model.NoSuchBucketException;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.ObjectCannedACL;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
-import software.amazon.awssdk.transfer.s3.Download;
-import software.amazon.awssdk.transfer.s3.DownloadRequest;
+import software.amazon.awssdk.transfer.s3.DownloadFileRequest;
+import software.amazon.awssdk.transfer.s3.FileDownload;
+import software.amazon.awssdk.transfer.s3.FileUpload;
 import software.amazon.awssdk.transfer.s3.S3ClientConfiguration;
 import software.amazon.awssdk.transfer.s3.S3TransferManager;
-import software.amazon.awssdk.transfer.s3.Upload;
-import software.amazon.awssdk.transfer.s3.UploadRequest;
+import software.amazon.awssdk.transfer.s3.UploadFileRequest;
 
 // CHECKSTYLE.OFF: ClassDataAbstractionCoupling
 public final class S3Wagon extends AbstractWagon {
@@ -139,9 +139,9 @@ public final class S3Wagon extends AbstractWagon {
         final String key;
         key = String.join("", prefix, destination);
 
-        Upload upload = null;
+        FileUpload upload = null;
         try {
-            upload = transferManager.upload(UploadRequest
+            upload = transferManager.uploadFile(UploadFileRequest
                 .builder()
                 .putObjectRequest(PutObjectRequest
                     .builder()
@@ -187,7 +187,7 @@ public final class S3Wagon extends AbstractWagon {
                 bucket));
         }
 
-        Download download = null;
+        FileDownload download = null;
         try {
             // File cannot be overwritten yet: https://github.com/aws/aws-sdk-java-v2/pull/2595
             if (destination.exists()) {
@@ -198,7 +198,7 @@ public final class S3Wagon extends AbstractWagon {
                 }
             }
 
-            download = transferManager.download(DownloadRequest
+            download = transferManager.downloadFile(DownloadFileRequest
                 .builder()
                 .destination(destination)
                 .getObjectRequest(GetObjectRequest
